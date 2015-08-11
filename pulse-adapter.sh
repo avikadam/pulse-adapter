@@ -7,7 +7,7 @@ ENABLEASSERTIONS=-enableassertions
 ENABLEASSERTIONS=
 
 PULSE=target/classes
-PULSE=target/pulse-adapter-1.0-SNAPSHOT.jar
+PULSE=target/pulse-adapter-1.1-SNAPSHOT.jar
 
 # Apache Commons command-line-processor
 COMMONSCLI=commons-cli-1.2.jar

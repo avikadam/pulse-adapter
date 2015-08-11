@@ -109,7 +109,7 @@ public class Consumer implements Client {
 
 /* RFA OMM consumer interface. */
 	private OMMConsumer omm_consumer;
-        private OMMPool omm_pool;
+	private OMMPool omm_pool;
 	private OMMEncoder omm_encoder;
 
 /* RFA market data subscriber interface. */
@@ -175,12 +175,12 @@ public class Consumer implements Client {
 	private static final boolean DO_NOT_CACHE_ZERO_VALUE = true;
 	private static final boolean DO_NOT_CACHE_BLANK_VALUE = true;
 
-	private static final int OMM_PAYLOAD_SIZE       = 5000;
+	private static final int OMM_PAYLOAD_SIZE	= 5000;
 	private static final int GC_DELAY_MS		= 15000;
 	private static final int RESUBSCRIPTION_MS	= 180000;
 
-	private static final String RSSL_PROTOCOL       = "rssl";
-	private static final String SSLED_PROTOCOL      = "ssled";
+	private static final String RSSL_PROTOCOL	= "rssl";
+	private static final String SSLED_PROTOCOL	= "ssled";
 
 	public Consumer (SessionConfig config, Rfa rfa, EventQueue event_queue) {
 		this.config = config;
@@ -827,7 +827,7 @@ GenericOMMParser.parse (msg);
 //GenericOMMParser.parse (msg);
 		final RDMLoginResponse response = new RDMLoginResponse (msg);
 		final byte stream_state = response.getRespStatus().getStreamState();
-		final byte data_state   = response.getRespStatus().getDataState();
+		final byte data_state	= response.getRespStatus().getDataState();
 
 		switch (stream_state) {
 		case OMMState.Stream.OPEN:
@@ -1196,6 +1196,7 @@ GenericOMMParser.initializeDictionary (field_dictionary);
 		  .append (",\"fields\":{");
 /* Use field_set to also count matching FIDs in update to view */
 		this.field_set.clear();
+		OMMMap embedded_map = null;
 		if (!field_list.isBlank() && !view.isEmpty()) {
 			final Iterator<?> it = field_list.iterator();
 			while (it.hasNext()) {
@@ -1245,6 +1246,10 @@ GenericOMMParser.initializeDictionary (field_dictionary);
 							  .append (':')
 							  .append ('\"').append (rdm_dictionary.getFieldDictionary().expandedValueFor (fid, ((OMMEnum)data).getValue())).append ('\"');
 							break;
+/* _INS type RIC embedded */
+						case OMMTypes.MAP:
+LOG.info("i have a map");
+							embedded_map = (OMMMap)data;
 						default:
 							sb.append ('\"').append (fid_def.getName()).append ('\"')
 							  .append (':')
@@ -1253,7 +1258,18 @@ GenericOMMParser.initializeDictionary (field_dictionary);
 						}
 					}
 					this.field_set.add ((int)fid);
-					if (view.size() == this.field_set.size()) break;
+// cannot shortcut with embedded map fields
+//					if (view.size() == this.field_set.size()) break;
+				} else {
+					final FidDef fid_def = rdm_dictionary.getFieldDictionary().getFidDef (fid);
+					final OMMData data = field_entry.getData (fid_def.getOMMType());  
+					switch (fid_def.getOMMType()) {
+/* _INS type RIC embedded */
+					case OMMTypes.MAP:
+						embedded_map = (OMMMap)data;
+					default:
+						break;
+					}
 				}
 			}
 		}
@@ -1261,6 +1277,36 @@ GenericOMMParser.initializeDictionary (field_dictionary);
 /* Ignore updates with no matching fields */
 		if (!this.field_set.isEmpty()) {
 			LOG.info (SPS_MARKER, this.sb.toString());
+		}
+
+/* Tail recursion */
+		if (null != embedded_map) {
+			this.sb.setLength (0);
+			this.sb .append (service_name)
+				.append ('.')
+				.append (item_name)
+				.append("_INS");
+			final ItemStream item_stream = this.directory.get (this.sb.toString());
+			if (null == item_stream) {
+				LOG.error("Cannot find RIC {} in configuration for embedded map expansion.", this.sb.toString());
+			} else {
+/* not java.lang.iterable */
+				for (Iterator it = embedded_map.iterator(); it.hasNext();) {
+					final OMMMapEntry map_entry = (OMMMapEntry)it.next();
+					if (map_entry.getAction() != OMMMapEntry.Action.DELETE
+						&& map_entry.getKey().getType() == OMMTypes.BUFFER
+						&& map_entry.getDataType() == OMMTypes.FIELD_LIST)
+					{      
+						final OMMDataBuffer data_buffer = (OMMDataBuffer)map_entry.getKey();
+					       
+						this.OnSpsFieldList (dt_as_string,
+								service_name,
+								data_buffer.getString ("ASCII"),
+								item_stream.getViewByFid(),
+								(OMMFieldList)map_entry.getData());
+					}		       
+				}
+			}
 		}
 	}
 
@@ -1295,20 +1341,20 @@ GenericOMMParser.initializeDictionary (field_dictionary);
 /* Rewrite to RSSL/OMM semantics, (Stream,Data,Code)
  *
  * Examples: OPEN,OK,NONE
- * 	     - The item is served by the provider. The consumer application established
- * 	       the item event stream.
+ *	     - The item is served by the provider. The consumer application established
+ *	       the item event stream.
  *
- * 	     OPEN,SUSPECT,NO_RESOURCES
- * 	     - The provider does not offer data for the requested item at this time.
- * 	       However, the system will try to recover this item when available.
+ *	     OPEN,SUSPECT,NO_RESOURCES
+ *	     - The provider does not offer data for the requested item at this time.
+ *	       However, the system will try to recover this item when available.
  *
- * 	     CLOSED_RECOVER,SUSPECT,NO_RESOURCES
- * 	     - The provider does not offer data for the requested item at this time. The
- * 	       application can try to re-request the item later.
+ *	     CLOSED_RECOVER,SUSPECT,NO_RESOURCES
+ *	     - The provider does not offer data for the requested item at this time. The
+ *	       application can try to re-request the item later.
  *
- * 	     CLOSED,SUSPECT,/any/
- * 	     -  The item is not open on the provider, and the application should close this
- * 	        stream.
+ *	     CLOSED,SUSPECT,/any/
+ *	     -	The item is not open on the provider, and the application should close this
+ *		stream.
  */
 		String stream_state = "OPEN", data_state = "NO_CHANGE";
 		if (isEventStreamClosed || MarketDataItemStatus.CLOSED == status.getState())
